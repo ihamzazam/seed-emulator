@@ -133,6 +133,15 @@ wallet/keys/keylog — rerun phases C–F after any rebuild.
 
 ## State at last update (2026-11-04)
 
+- Pushed to the user's FORK: `github.com/ihamzazam/seed-emulator`, branch
+  `wannacry-payload`, commit 270653e0 (entire v2 example incl. this memory
+  duplicated at examples/yesterday_once_more/Y04_wannacry/v2/MEMORY.md).
+  upstream (seed-labs) push is disabled — keep it that way.
+- IMPORTANT: the ChainSeed gas fix (deploy template 2M→4.5M) lives in the
+  LOCAL chain-seed repo (uncommitted); its origin is the MAIN seed-labs repo
+  — do NOT push it there. It is also patched in the uv-cache installed copy.
+  Any fresh machine must re-apply that one-line patch (see bug #3).
+
 - FULL CYCLE COMPLETED AND VERIFIED: payload → paid registration (tx 0xb59b...)
   → attacker reply (0x4c84...) → victim recovered 5 docs (hash-verified) →
   withdraw (0x4244...). This was done as a live repair/rehearsal of the user's

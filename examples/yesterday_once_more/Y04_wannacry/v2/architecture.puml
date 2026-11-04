@@ -1,0 +1,92 @@
+@startuml
+' Detailed technical companion to diagrams/architecture.html and architecture.svg.
+title WannaCry Incident Lab\n<size:14>Architecture · AS180 / 10.180.0.0/24</size>
+left to right direction
+skinparam backgroundColor #0B1220
+skinparam defaultFontName SansSerif
+skinparam defaultFontSize 13
+skinparam defaultFontColor #E9EEF7
+skinparam titleFontColor #E9EEF7
+skinparam shadowing false
+skinparam roundCorner 16
+skinparam padding 12
+skinparam nodesep 40
+skinparam ranksep 65
+skinparam linetype ortho
+skinparam ArrowColor #A4B3CA
+skinparam ArrowFontColor #CBD5E1
+skinparam ArrowFontSize 11
+skinparam packageStyle rectangle
+skinparam packageBackgroundColor #101B2C
+skinparam packageBorderColor #34455E
+skinparam packageFontColor #A4B3CA
+skinparam componentStyle rectangle
+skinparam componentBackgroundColor #172438
+skinparam componentBorderColor #34455E
+skinparam componentFontColor #E9EEF7
+skinparam databaseBackgroundColor #25213B
+skinparam databaseBorderColor #B5A1FF
+skinparam databaseFontColor #E9EEF7
+skinparam noteBackgroundColor #152337
+skinparam noteBorderColor #34455E
+skinparam noteFontColor #CBD5E1
+
+package "ATTACKER · host_1\n10.180.0.72" #261F26 {
+  component "Incident operator\nlab_keylogic.py CLI\ninit-attacker · deliver · watch · withdraw" as ATTACKER #30232B
+  component "Cryptographic identity\nattacker_keys.json\nRSA private key stays on host_1" as KEYS #30232B
+  component "Payment identity\nattacker_chain_key.json\naccount copied from utility" as ACCOUNT #30232B
+  KEYS -down- ATTACKER
+  ACCOUNT -down- ATTACKER
+}
+
+package "VICTIM · host_0\n10.180.0.71" #10282D {
+  component "Delivery inbox :4450\nwormdoor.py · POST /drop\nManual courier stand-in" as DOOR #16343B
+  component "Local cryptography\nlab_keylogic.py\npayload_exec · recover_samples" as CRYPTO #16343B
+  component "Participant menu\nparticipant.py + terminal_ui.py\n[2] inspect  [3] exchange\n[5] pay / recover  [6] wallet" as UI #16343B
+  component "Signed chain transport\nlab_ransom_chain.py\nvictim_exchange · wait_reply" as TRANSPORT #16343B
+  component "Documents + ransom note\n/home/seed/import_folder\n5 fixtures ⇄ .WNCRY envelopes" as FILES #16343B
+  component "wallet.json\nPassword-protected keystore\nTransaction signing only" as WALLET #16343B
+  DOOR -down-> CRYPTO : execute locally
+  CRYPTO -down-> FILES : encrypt / restore
+  UI -down-> WALLET : create / unlock
+  UI --> TRANSPORT : pay / poll
+  UI --> CRYPTO : recover locally
+}
+
+package "PRIVATE ETHEREUM PoA\nChain ID 18000" #201D33 {
+  database "RansomExchange\n\nregisterVictim(bytes, bytes)\nExactly 1 lab ETH\n\nsubmitReply(id, bytes)\nAttacker only\n\ngetReply(id) · withdraw()" as CONTRACT
+  component "chain0 / chain1 / chain2\n10.180.0.81–83\nRPC 10.180.0.83:8545" as GETH #2B2541
+  GETH -up- CONTRACT : hosts contract state
+}
+
+ATTACKER -[#FF947F,bold]-> DOOR : 01 · deliver public key
+TRANSPORT -[#B5A1FF,bold]-> CONTRACT : 03 · signed request + 1 lab ETH
+ATTACKER -[#FF947F,bold]-> CONTRACT : 04 · watch / sealed reply\noptional withdraw
+CONTRACT -[#B4E68A,bold]-> TRANSPORT : 05 · read sealed reply\nthen recover locally
+
+package "BUILD + SUPPORT" {
+  component "Docker host\nemulator.py + lab_chain.py\nTopology / services / lab files" as BUILD
+  component "SEED Internet Map\nlocalhost:8080\nOpen node shells" as MAP
+  component "router0\n10.180.0.254" as ROUTER
+  component "Faucet\n10.180.0.90\nLab ETH dispenser" as FAUCET
+  component "Utility server\n10.180.0.95:8080\nContract address + account.json" as UTIL
+  BUILD ..> ROUTER : compile
+  BUILD ..> UTIL : boot
+  FAUCET ..> UTIL : fund deployer
+  UTIL ..> CONTRACT : deploy at boot
+}
+UI ..> FAUCET : SEED Exchange facade
+
+note bottom of CRYPTO
+  02 · Encrypt five fixtures locally.
+  RSA-2048 + AES-256-GCM.
+  Recovery checks each SHA-256 baseline.
+end note
+
+legend bottom
+  <color:#FF947F>━━</color> Attacker actions    <color:#B5A1FF>━━</color> Payment / request    <color:#B4E68A>━━</color> Reply / recovery
+  Key hierarchy: attacker private key → victim private key → file key → documents
+  On-chain payloads are opaque sealed bytes. Reply contains only sealed victim_priv.
+  Victim unseals its file key locally; ephemeral X25519 protects the reply channel.
+endlegend
+@enduml

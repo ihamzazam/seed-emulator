@@ -1,0 +1,100 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1020" viewBox="0 0 1600 1020" role="img" aria-labelledby="title desc">
+<title id="title">WannaCry incident lab — architecture and incident flow</title>
+<desc id="desc">An attacker delivers a public key to the victim inbox. Five fixture documents are encrypted locally. The victim pays exactly one lab ETH to RansomExchange on a private Ethereum chain. The attacker posts a sealed reply; the victim retrieves it and recovers the documents locally. Supporting infrastructure includes a faucet, utility server, and SEED map.</desc>
+<defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="#243248" opacity=".45"/></pattern>
+<marker id="coral" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#ff947f" stroke-width="1.5"/></marker>
+<marker id="cyan" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#6be4dc" stroke-width="1.5"/></marker>
+<marker id="purple" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#b5a1ff" stroke-width="1.5"/></marker>
+<marker id="green" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M1 1 L8 5 L1 9" fill="none" stroke="#b4e68a" stroke-width="1.5"/></marker>
+</defs><rect width="1600" height="1020" rx="24" fill="#0b1220"/><rect width="1600" height="1020" fill="url(#grid)"/>
+<g font-family="DejaVu Sans,Arial,sans-serif">
+<text x="64" y="51" font-size="14" fill="#6be4dc" font-weight="600" text-anchor="start">SEED EMULATOR  /  YESTERDAY ONCE MORE</text>
+<text x="64" y="105" font-size="40" fill="#e9eef7" font-weight="700" text-anchor="start">WannaCry, from delivery to recovery.</text>
+<text x="64" y="140" font-size="19" fill="#a4b3ca" font-weight="400" text-anchor="start">Two human roles. One on-chain exchange. Five documents restored.</text>
+<rect x="1280" y="42" width="256" height="40" rx="20" fill="#152337" stroke="#2a384f"/>
+<text x="1408" y="68" font-size="14" fill="#c4d1e4" font-weight="600" text-anchor="middle">PRIVATE LAB  ·  AS180</text>
+<rect x="64" y="183" width="448" height="188" rx="16" fill="#121e30" stroke="#2a384f"/>
+<rect x="65" y="200" width="3" height="33" rx="1" fill="#ff947f"/>
+<text x="88" y="214" font-size="13" fill="#ff947f" font-weight="700" text-anchor="start">01  /  ATTACKER</text>
+<text x="88" y="249" font-size="27" fill="#e9eef7" font-weight="700" text-anchor="start">host_1</text>
+<text x="88" y="276" font-size="16" fill="#a4b3ca" font-weight="400" text-anchor="start">10.180.0.72</text>
+<text x="88" y="307" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">Deliver the public key · watch requests</text>
+<text x="88" y="332" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">Post sealed replies · withdraw funds</text>
+<text x="88" y="353" font-size="13" fill="#ff947f" font-weight="400" text-anchor="start">RSA private key stays on this host.</text>
+<rect x="576" y="183" width="448" height="188" rx="16" fill="#121e30" stroke="#2a384f"/>
+<rect x="577" y="200" width="3" height="33" rx="1" fill="#6be4dc"/>
+<text x="600" y="214" font-size="13" fill="#6be4dc" font-weight="700" text-anchor="start">02  /  VICTIM</text>
+<text x="600" y="249" font-size="27" fill="#e9eef7" font-weight="700" text-anchor="start">host_0</text>
+<text x="600" y="276" font-size="16" fill="#a4b3ca" font-weight="400" text-anchor="start">10.180.0.71</text>
+<text x="600" y="307" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">Delivery inbox :4450 · participant menu</text>
+<text x="600" y="332" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">Five documents · encrypted wallet</text>
+<text x="600" y="353" font-size="13" fill="#6be4dc" font-weight="400" text-anchor="start">File key and recovery stay local.</text>
+<rect x="1088" y="183" width="448" height="188" rx="16" fill="#121e30" stroke="#2a384f"/>
+<rect x="1089" y="200" width="3" height="33" rx="1" fill="#b5a1ff"/>
+<text x="1112" y="214" font-size="13" fill="#b5a1ff" font-weight="700" text-anchor="start">03  /  EXCHANGE</text>
+<text x="1112" y="249" font-size="27" fill="#e9eef7" font-weight="700" text-anchor="start">RansomExchange</text>
+<text x="1112" y="276" font-size="16" fill="#a4b3ca" font-weight="400" text-anchor="start">Ethereum PoA · chain ID 18000</text>
+<text x="1112" y="307" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">registerVictim: exactly 1 lab ETH</text>
+<text x="1112" y="332" font-size="16" fill="#e9eef7" font-weight="400" text-anchor="start">submitReply: attacker identity only</text>
+<text x="1112" y="353" font-size="13" fill="#b5a1ff" font-weight="400" text-anchor="start">Only opaque sealed key material on-chain.</text>
+<path d="M288 385 V795" stroke="#304057" stroke-width="2" stroke-dasharray="4 9"/>
+<path d="M800 385 V795" stroke="#304057" stroke-width="2" stroke-dasharray="4 9"/>
+<path d="M1312 385 V795" stroke="#304057" stroke-width="2" stroke-dasharray="4 9"/>
+<g class="step" data-step="1">
+<rect x="64" y="387" width="38" height="32" rx="9" fill="#172438" stroke="#ff947f"/>
+<text x="83" y="409" font-size="14" fill="#ff947f" font-weight="700" text-anchor="middle">01</text>
+<path d="M288 425 H800" stroke="#ff947f" stroke-width="2.5" marker-end="url(#coral)"/>
+<text x="544.0" y="410" font-size="18" fill="#ff947f" font-weight="600" text-anchor="middle">Deliver public key</text>
+<text x="544.0" y="452" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="middle">Manual courier → wormdoor.py</text>
+<circle cx="288" cy="425" r="5" fill="#ff947f"/>
+<circle cx="800" cy="425" r="5" fill="#ff947f"/>
+</g>
+<g class="step" data-step="2">
+<rect x="64" y="463" width="38" height="32" rx="9" fill="#172438" stroke="#6be4dc"/>
+<text x="83" y="485" font-size="14" fill="#6be4dc" font-weight="700" text-anchor="middle">02</text>
+<path d="M800 501 H956 V521 H800" fill="none" stroke="#6be4dc" stroke-width="2.5" marker-end="url(#cyan)"/>
+<text x="980" y="486" font-size="18" fill="#6be4dc" font-weight="600" text-anchor="start">Encrypt locally</text>
+<text x="980" y="544" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="start">5 documents → .WNCRY</text>
+<circle cx="800" cy="501" r="5" fill="#6be4dc"/>
+</g>
+<g class="step" data-step="3">
+<rect x="64" y="544" width="38" height="32" rx="9" fill="#172438" stroke="#b5a1ff"/>
+<text x="83" y="566" font-size="14" fill="#b5a1ff" font-weight="700" text-anchor="middle">03</text>
+<path d="M800 582 H1312" stroke="#b5a1ff" stroke-width="2.5" marker-end="url(#purple)"/>
+<text x="1056.0" y="567" font-size="18" fill="#b5a1ff" font-weight="600" text-anchor="middle">Pay 1 lab ETH</text>
+<text x="1056.0" y="609" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="middle">Signed request + sealed bytes</text>
+<circle cx="800" cy="582" r="5" fill="#b5a1ff"/>
+<circle cx="1312" cy="582" r="5" fill="#b5a1ff"/>
+</g>
+<g class="step" data-step="4">
+<rect x="64" y="625" width="38" height="32" rx="9" fill="#172438" stroke="#ff947f"/>
+<text x="83" y="647" font-size="14" fill="#ff947f" font-weight="700" text-anchor="middle">04</text>
+<path d="M288 663 H1312" stroke="#ff947f" stroke-width="2.5" marker-end="url(#coral)"/>
+<text x="800.0" y="648" font-size="18" fill="#ff947f" font-weight="600" text-anchor="middle">Post sealed reply</text>
+<text x="800.0" y="690" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="middle">watch → submitReply · victim private key sealed for its recipient</text>
+<circle cx="288" cy="663" r="5" fill="#ff947f"/>
+<circle cx="1312" cy="663" r="5" fill="#ff947f"/>
+</g>
+<g class="step" data-step="5">
+<rect x="64" y="706" width="38" height="32" rx="9" fill="#172438" stroke="#b4e68a"/>
+<text x="83" y="728" font-size="14" fill="#b4e68a" font-weight="700" text-anchor="middle">05</text>
+<path d="M1312 744 H800" stroke="#b4e68a" stroke-width="2.5" marker-end="url(#green)"/>
+<text x="1056.0" y="729" font-size="18" fill="#b4e68a" font-weight="600" text-anchor="middle">Read reply → recover locally</text>
+<text x="1056.0" y="771" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="middle">5 originals restored · SHA-256 verified</text>
+<circle cx="1312" cy="744" r="5" fill="#b4e68a"/>
+<circle cx="800" cy="744" r="5" fill="#b4e68a"/>
+</g>
+<rect x="64" y="819" width="1472" height="107" rx="16" fill="#101b2c" stroke="#2a384f"/>
+<text x="88" y="847" font-size="12" fill="#7f94b3" font-weight="700" text-anchor="start">SUPPORTING INFRASTRUCTURE</text>
+<text x="88" y="878" font-size="17" fill="#e9eef7" font-weight="600" text-anchor="start">Docker host + SEED map</text>
+<text x="88" y="904" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="start">Build / control · localhost:8080</text>
+<text x="455" y="878" font-size="17" fill="#e9eef7" font-weight="600" text-anchor="start">3 Geth signers</text>
+<text x="455" y="904" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="start">10.180.0.81–83 · RPC .83:8545</text>
+<text x="822" y="878" font-size="17" fill="#e9eef7" font-weight="600" text-anchor="start">Faucet</text>
+<text x="822" y="904" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="start">10.180.0.90 · lab ETH</text>
+<text x="1189" y="878" font-size="17" fill="#e9eef7" font-weight="600" text-anchor="start">Utility server</text>
+<text x="1189" y="904" font-size="14" fill="#a4b3ca" font-weight="400" text-anchor="start">10.180.0.95:8080 · deployment</text>
+<text x="64" y="961" font-size="12" fill="#6be4dc" font-weight="700" text-anchor="start">KEY HIERARCHY</text>
+<text x="214" y="961" font-size="17" fill="#e9eef7" font-weight="400" text-anchor="start">Attacker private key → victim private key → file key → documents</text>
+<text x="64" y="994" font-size="13" fill="#7f94b3" font-weight="400" text-anchor="start">Network: 10.180.0.0/24 · router0 .254     /     SEED Exchange is a faucet facade     /     Controlled five-fixture demonstration</text>
+</g></svg>

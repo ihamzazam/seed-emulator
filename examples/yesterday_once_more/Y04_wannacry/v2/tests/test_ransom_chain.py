@@ -5,6 +5,7 @@ contract ABI, calldata round-trips through eth_abi, event-id extraction,
 and the full offline reply encryption used by attacker_watch.
 """
 
+import hashlib
 import json
 import sys
 import tempfile
@@ -141,8 +142,9 @@ class OfflineReplyTests(unittest.TestCase):
             ),
             self.keylog,
         )
-        file_key = lab_keylogic.victim_open_file_key(victim_priv_pem, self.keylog)
-        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem, file_key)
+        # New protocol: the attacker replies with victim_priv ONLY — the
+        # victim derives the file key locally from its own keylog.
+        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem)
 
         # Victim opens the reply with its saved ephemeral private key.
         request_path = self.root / "exchange_request.json"
@@ -155,13 +157,70 @@ class OfflineReplyTests(unittest.TestCase):
                 )
             )}
         ))
-        opened = lab_keylogic.victim_accept_reply(request_path, reply)
+        opened = lab_keylogic.victim_accept_reply(request_path, reply, self.keylog)
         plain = lab_keylogic.AESGCM(opened["file_key"]).decrypt(
             lab_keylogic.unb64(self.keylog["files"]["notes.txt"]["nonce"]),
             lab_keylogic.unb64(self.keylog["files"]["notes.txt"]["ciphertext"]),
             b"as180-host_0/notes.txt",
         )
         self.assertEqual(plain.decode(), "Team handover notes\nPrepare the weekly report on Friday.\nThe next team meeting is on Monday.\n")
+
+    def test_watch_works_without_local_keylog(self):
+        """attacker_watch's on-chain-blob path: no victim keylog required.
+
+        Simulates exactly what attacker_watch does now: builds a keylog VIEW
+        from attacker_pub + the on-chain sealed blob and recovers victim_priv.
+        """
+        attacker_keys = json.loads((self.root / "attacker_keys.json").read_text())
+        blob_json = json.dumps(self.keylog["victim_priv_sealed"])  # as stored on-chain
+        keylog_view = {
+            "attacker_pub_pem": attacker_keys["attacker_pub_pem"],
+            "victim_priv_sealed": json.loads(blob_json),
+        }
+        victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
+            lab_keylogic.unb64(attacker_keys["attacker_priv_pem"]), keylog_view
+        )
+        # A different attacker key must be refused.
+        other = self.root / "other_keys.json"
+        lab_keylogic.create_attacker_keys(other)
+        other_keys = json.loads(other.read_text())
+        bad_view = dict(keylog_view, attacker_pub_pem=other_keys["attacker_pub_pem"])
+        with self.assertRaises(ValueError):
+            lab_keylogic.attacker_open_victim_priv(
+                lab_keylogic.unb64(other_keys["attacker_priv_pem"]), bad_view
+            )
+
+    def test_wnCRY_naming_and_recovery_round_trip(self):
+        """The payload leaves <name>.WNCRY envelopes; recovery restores names."""
+        for name in lab_keylogic.SAMPLES:
+            self.assertFalse((self.corpus / name).exists())
+            envelope = (self.corpus / (name + lab_keylogic.ENCRYPTED_SUFFIX)).read_bytes()
+            self.assertTrue(envelope.startswith(lab_keylogic.MAGIC))
+        state_path = self.root / "participant.json"
+        state_path.write_text(json.dumps({
+            "original_hashes": {
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in lab_keylogic.SAMPLES.items()
+            }
+        }))
+        victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
+            lab_keylogic.unb64(
+                json.loads((self.root / "attacker_keys.json").read_text())["attacker_priv_pem"]
+            ),
+            self.keylog,
+        )
+        file_key = lab_keylogic.victim_open_file_key(victim_priv_pem, self.keylog)
+        lab_keylogic.recover_samples(
+            file_key, self.corpus, "as180-host_0", self.keylog, state_path
+        )
+        for name in lab_keylogic.SAMPLES:
+            self.assertTrue((self.corpus / name).exists())
+            self.assertFalse((self.corpus / (name + lab_keylogic.ENCRYPTED_SUFFIX)).exists())
+        self.assertEqual(
+            (self.corpus / "notes.txt").read_text(),
+            "Team handover notes\nPrepare the weekly report on Friday.\n"
+            "The next team meeting is on Monday.\n",
+        )
 
 
 if __name__ == "__main__":

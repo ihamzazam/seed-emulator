@@ -7,8 +7,10 @@ from getpass import getpass
 import json
 import os
 from pathlib import Path
+import random
 import shutil
 import sys
+import time
 from threading import Event, Thread
 
 from cryptography.exceptions import InvalidTag
@@ -123,6 +125,57 @@ def wallet_screen(wallet_file):
             pause()
 
 
+def exchange_screen(wallet_file):
+    """Buy lab ETH on the SEED Crypto Exchange; the faucet settles beneath.
+
+    Pure theater on top of the lab faucet: the participant sees a market
+    screen and an order flow, while request_funds does the real transfer.
+    """
+    while True:
+        heading("SEED CRYPTO EXCHANGE", "Play-money market / settlement on private chain 18000")
+        exists = wallet_file.exists() or wallet_file.is_symlink()
+        address = lab_wallet.wallet_address(wallet_file) if exists else None
+        field("Deposit address", address or "No wallet yet — create one first (option 6)")
+        if not address:
+            print("\n[b] Back")
+            if input("\nExchange > ").strip().lower() == "b":
+                return
+            continue
+        try:
+            value = lab_wallet.balance_wei(lab_wallet.connect(), address)
+            balance = f"{lab_wallet.format_ether(value)} lab ETH"
+        except ERRORS:
+            balance = "Unavailable"
+        field("Your balance", balance)
+        field("LAB/USD", f"{random.uniform(1985.0, 2115.0):,.2f} (play rate)")
+        print("\n[1] Buy 1 lab ETH   [2] Buy 2 lab ETH   [3] Buy 3 lab ETH")
+        print("[5] Buy 5 lab ETH   [a] Custom amount (1-5)")
+        print("[b] Back")
+        choice = input("\nExchange > ").strip().lower()
+        try:
+            if choice == "b":
+                return
+            elif choice in ("1", "2", "3", "5"):
+                amount = int(choice)
+            elif choice == "a":
+                amount = int(input("Amount of lab ETH to buy (1-5): "))
+            else:
+                print("Choose one of the displayed actions.")
+                pause()
+                continue
+            if not 1 <= amount <= 5:
+                raise ValueError("the exchange trades whole amounts from 1 to 5 lab ETH")
+            with busy("Placing your order on the SEED Exchange..."):
+                time.sleep(1.0)  # order matching theater
+                lab_wallet.request_funds(lab_wallet.connect(), address, amount)
+                time.sleep(0.4)  # settlement theater
+            print(f"\nOrder filled: +{amount} lab ETH delivered to your wallet.")
+            pause()
+        except ERRORS as error:
+            print(f"\nExchange: {error}")
+            pause()
+
+
 def run_interface(target, state_file, inspect_documents):
     """Allow one active UI per participant to avoid overlapping actions."""
     wallet_file = state_file.parent / "wallet.json"
@@ -142,11 +195,11 @@ def run_interface(target, state_file, inspect_documents):
                     print(f"Participant record unavailable: {error}")
                 field("Wallet", "Available" if wallet_file.exists() else "Not created")
                 print("\n  DOCUMENTS                      WALLET & FUNDING")
-                print("  [1] Instructions               [6] My wallet")
-                print("  [2] Inspect documents")
+                print("  [1] Instructions               [3] SEED Exchange (buy lab ETH)")
+                print("  [2] Inspect documents          [6] My wallet")
                 print("  [5] Document recovery (exchange)")
                 print("\n  [0] Exit")
-                print("\nPayment contracts are not implemented; wallet funding does not gate recovery.")
+                print("\nRansom payment is enforced by the RansomExchange contract on chain 18000.")
                 choice = input("\nHome > ").strip()
                 try:
                     if choice == "0":
@@ -190,6 +243,8 @@ def run_interface(target, state_file, inspect_documents):
                             target, state_file, lab_dir, password=password
                         )
                         pause()
+                    elif choice == "3":
+                        exchange_screen(wallet_file)
                     elif choice in ("6", "7"):
                         wallet_screen(wallet_file)
                     else:

@@ -1,0 +1,53 @@
+WannaCry Incident Lab — Manual Command Runbook
+===============================================
+
+For operators who prefer the terminal over the participant menu. Every step
+below does exactly what the interactive program does; use one style or the
+other, not both at once.
+
+All victim-side commands run inside host_0, in /opt/wannacry-v2.
+All attacker-side commands run inside host_1, in /opt/wannacry-v2.
+
+--- VICTIM SIDE (host_0) ---
+
+Status (read-only, safe anytime):
+    python3 /opt/wannacry-v2/check_state.py
+
+Create the wallet (asks for a password; the keystore is local):
+    python3 -c "import lab_wallet; lab_wallet.create_wallet(lab_wallet.CONFIG, input('password: '))"
+
+Fund the wallet manually (the participant menu does this through the
+SEED Exchange screen; this is the same faucet underneath):
+    python3 -c "import lab_wallet; lab_wallet.request_funds(lab_wallet.connect(), '0xYOUR_ADDRESS', 5)"
+
+Check balance:
+    python3 -c "import lab_wallet; print(lab_wallet.format_ether(lab_wallet.balance_wei(lab_wallet.connect(), lab_wallet.wallet_address(lab_wallet.Path('/opt/wannacry-v2/wallet.json')))), 'lab ETH')"
+
+Pay the ransom and recover (registers request, pays 1 ETH on-chain,
+waits for the attacker reply, decrypts, restores original filenames):
+    python3 /opt/wannacry-v2/participant.py    # then choose option 5
+
+--- ATTACKER SIDE (host_1) ---
+
+Create the attacker keypair (once; attacker_priv never leaves this host):
+    python3 lab_keylogic.py init-attacker
+
+Deliver the payload to the victim (drops the attacker public key onto the
+victim's delivery inbox and detonates the payload there):
+    python3 lab_keylogic.py deliver --victim-url http://<victim-ip>:4450
+
+Watch the chain and answer paid requests (offline crypto + on-chain reply):
+    python3 lab_keylogic.py watch --chain-key attacker_chain_key.json --rpc-url http://10.180.0.83:8545 --utility-url http://10.180.0.95:8080
+
+Sweep the contract balance:
+    python3 lab_keylogic.py withdraw --chain-key attacker_chain_key.json --rpc-url http://10.180.0.83:8545 --utility-url http://10.180.0.95:8080
+
+--- NOTES ---
+
+- The attacker public key travels from host_1 to host_0 through the victim's
+  delivery inbox (:4450). This stand-in plays the worm's drop stage; real
+  propagation will replace it.
+- The reply carries only the victim's private key. The victim host derives
+  its own file key; no key material beyond that ever crosses the chain.
+- Recreating a host container wipes runtime state (wallet, keys, keylog) —
+  re-run setup after any rebuild.

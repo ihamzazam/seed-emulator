@@ -5,7 +5,7 @@ import argparse
 import hashlib
 from pathlib import Path
 
-from lab_keylogic import MAGIC, NONCE_SIZE, SAMPLES, TAG_SIZE
+from lab_keylogic import ENCRYPTED_SUFFIX, MAGIC, NONCE_SIZE, SAMPLES, TAG_SIZE
 from terminal_ui import run_interface
 
 
@@ -15,22 +15,29 @@ def inspect_documents(target: Path, record: dict):
         raise ValueError("sample directory must be a real directory")
     observations = {}
     for name, original in sorted(SAMPLES.items()):
-        path = target / name
+        plain_path = target / name
+        cipher_path = target / (name + ENCRYPTED_SUFFIX)
         envelope_size = len(MAGIC) + NONCE_SIZE + len(original) + TAG_SIZE
         try:
-            if path.is_symlink() or not path.is_file():
-                status = "MISSING OR NOT A REGULAR FILE"
-            elif path.stat().st_size not in (len(original), envelope_size):
-                status = "UNEXPECTED SIZE"
-            else:
-                data = path.read_bytes()
+            plain_present = not plain_path.is_symlink() and plain_path.is_file()
+            cipher_present = not cipher_path.is_symlink() and cipher_path.is_file()
+            if plain_present and cipher_present:
+                status = "INCONSISTENT — both plaintext and .WNCRY envelope exist"
+            elif cipher_present:
+                data = cipher_path.read_bytes()
+                if len(data) == envelope_size and data.startswith(MAGIC):
+                    status = "ENCRYPTED (.WNCRY) — ransomware envelope present"
+                else:
+                    status = "ENCRYPTED (.WNCRY) — UNEXPECTED FORMAT"
+            elif plain_present:
+                data = plain_path.read_bytes()
                 baseline = record.get("original_hashes", {}).get(name)
                 if data == original and hashlib.sha256(data).hexdigest() == baseline:
                     status = "ORIGINAL — baseline matches"
-                elif len(data) == envelope_size and data.startswith(MAGIC):
-                    status = "LAB ENVELOPE — integrity not checked"
                 else:
                     status = "CHANGED OR BASELINE MISMATCH"
+            else:
+                status = "MISSING"
         except OSError as error:
             status = f"UNREADABLE — {error}"
         observations[name] = status

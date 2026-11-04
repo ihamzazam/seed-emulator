@@ -7,6 +7,7 @@ It sends no transactions and moves no money.
 
 import json
 from pathlib import Path
+from urllib.request import urlopen
 
 import lab_keylogic
 import lab_ransom_chain
@@ -19,6 +20,13 @@ LAB_DIR = Path("/opt/wannacry-v2")
 def main():
     cfg = lab_wallet.connect()
     print(f"chain id {cfg['chain_id']} at {cfg['rpc_url']}")
+
+    try:
+        with urlopen("http://127.0.0.1:4450/status", timeout=3) as response:
+            door = json.load(response)
+        print(f"door:     {door.get('status')} (delivery inbox on :4450)")
+    except OSError:
+        print("door:     not running (delivery inbox service is down)")
 
     contract = lab_ransom_chain.discover_contract(cfg)
     code = lab_wallet.rpc(cfg, "eth_getCode", [contract, "latest"])
@@ -33,7 +41,7 @@ def main():
         balance = lab_wallet.balance_wei(cfg, address)
         print(f"wallet:   {address}")
         print(f"  balance: {lab_wallet.format_ether(balance)} lab ETH "
-              f"({'can pay 1 ETH ransom' if balance >= 10**18 else 'needs funding from the faucet'})")
+              f"({'can pay 1 ETH ransom' if balance >= 10**18 else 'buy lab ETH on the SEED Exchange (menu option 3)'})")
     else:
         print("wallet:   none yet (create it in the participant menu, option 6)")
 
@@ -41,10 +49,9 @@ def main():
     if keylog.exists():
         record = json.loads(keylog.read_text(encoding="utf-8"))
         print(f"payload:  executed on {record['participant_id']} "
-              f"({len(record['files'])} files encrypted)")
+              f"({len(record['files'])} files encrypted as .WNCRY)")
     else:
-        print("payload:  not executed yet "
-              "(run: python3 lab_keylogic.py payload)")
+        print("payload:  not executed yet (waiting for the attacker's delivery)")
 
     request_path = LAB_DIR / "exchange_request.json"
     if request_path.exists():

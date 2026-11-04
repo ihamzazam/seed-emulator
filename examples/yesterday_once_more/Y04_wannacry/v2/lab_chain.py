@@ -11,7 +11,19 @@ import json
 from pathlib import Path
 
 from chainseed.services.ethereum import ConsensusMechanism, EthereumService
+from chainseed.services.ethereum.EthTemplates import UtilityServerFileTemplates
 from seedemu.core import Binding, Filter
+
+
+# Our contract (RansomExchange.abi/bin) needs more deployment gas than
+# ChainSeed's pinned 2,000,000 — the real cost of the creation plus the
+# code deposit exceeded it and the deploy died silently (the template does
+# not check receipt status). The deploy script is a template string that
+# is only formatted when the utility server is configured, so the example
+# overrides the knob here: our blueprint decides what the chain gets.
+UtilityServerFileTemplates["deploy_contract"] = UtilityServerFileTemplates[
+    "deploy_contract"
+].replace("'gas': 2000000", "'gas': 4500000")
 
 
 HERE = Path(__file__).resolve().parent

@@ -85,8 +85,11 @@ ransom note).
 3. solc default EVM version (Shanghai) emits PUSH0 → older SEED Geth doesn't
    support it → deploy burns ALL gas and "succeeds" with a DEAD address
    (ChainSeed's deploy script never checks receipt status!). Fix:
-   `evm_version="london"` in compile_contract.py + gas raised 2M→4.5M in
-   ChainSeed's deploy template (patched in repo AND uv-cache copies)
+   `evm_version="london"` in compile_contract.py. The deploy gas pin was ALSO
+   raised 2M→4.5M — but from OUR side: lab_chain.py overrides the
+   `UtilityServerFileTemplates['deploy_contract']` template string at import
+   time (design principle: the example defines what the chain gets; NO
+   chain-seed patch needed, its repo stays clean, no fork required)
 4. `lab_ransom_chain.py` / `check_state.py` missing from emulator.py file
    list → ModuleNotFoundError in container; fixed, now in image
 5. `discover_contract()` called .get() on the plain-string response
@@ -137,10 +140,11 @@ wallet/keys/keylog — rerun phases C–F after any rebuild.
   `wannacry-payload`, commit 270653e0 (entire v2 example incl. this memory
   duplicated at examples/yesterday_once_more/Y04_wannacry/v2/MEMORY.md).
   upstream (seed-labs) push is disabled — keep it that way.
-- IMPORTANT: the ChainSeed gas fix (deploy template 2M→4.5M) lives in the
-  LOCAL chain-seed repo (uncommitted); its origin is the MAIN seed-labs repo
-  — do NOT push it there. It is also patched in the uv-cache installed copy.
-  Any fresh machine must re-apply that one-line patch (see bug #3).
+- IMPORTANT: NO chain-seed patches remain — the deploy-gas override lives in
+  lab_chain.py (template replacement at import), evm_version=london lives in
+  compile_contract.py, and the faucet cap is our own lab_chain.py knob.
+  The local chain-seed repo is clean; nothing to re-apply on fresh machines
+  beyond cloning the fork and installing (see bug #3 for rationale).
 
 - FULL CYCLE COMPLETED AND VERIFIED: payload → paid registration (tx 0xb59b...)
   → attacker reply (0x4c84...) → victim recovered 5 docs (hash-verified) →

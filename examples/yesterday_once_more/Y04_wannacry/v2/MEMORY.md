@@ -244,9 +244,11 @@ wallet/keys/keylog — rerun phases C–F after any rebuild.
 
 
 - Pushed to the user's FORK: `github.com/ihamzazam/seed-emulator`, branch
-  `wannacry-payload`, commit 270653e0 (entire v2 example incl. this memory
-  duplicated at examples/yesterday_once_more/Y04_wannacry/v2/MEMORY.md).
-  upstream (seed-labs) push is disabled — keep it that way.
+  `wannacry-payload`. Current commit: 06e870fb (v2.1: two-host split,
+  wormdoor delivery, .WNCRY, SEED Exchange, RUNBOOK/README/architecture
+  docs, user-rendered diagram assets in v2/diagrams/). Earlier: 270653e0
+  (initial v2 push), 4c16ff47 (intermediate). upstream (seed-labs) push is
+  disabled — keep it that way.
 - IMPORTANT: NO chain-seed patches remain — the deploy-gas override lives in
   lab_chain.py (template replacement at import), evm_version=london lives in
   compile_contract.py, and the faucet cap is our own lab_chain.py knob.

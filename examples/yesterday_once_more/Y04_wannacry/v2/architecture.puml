@@ -86,7 +86,8 @@ end note
 legend bottom
   <color:#FF947F>━━</color> Attacker actions    <color:#B5A1FF>━━</color> Payment / request    <color:#B4E68A>━━</color> Reply / recovery
   Key hierarchy: attacker private key → victim private key → file key → documents
-  On-chain payloads are opaque sealed bytes. Reply contains only sealed victim_priv.
-  Victim unseals its file key locally; ephemeral X25519 protects the reply channel.
+  Request posts victim_priv sealed under attacker_pub; reply posts it in plaintext.
+  No transport privacy (the attackers do not care); the menu grants the file key,
+  the victim pastes it into decryptor.py to restore the documents.
 endlegend
 @enduml

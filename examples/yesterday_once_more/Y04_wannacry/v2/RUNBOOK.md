@@ -134,10 +134,37 @@ Expected:
 ]
 ```
 
-The victim's waiting menu wakes up on its own and prints
-`as180-host_0: 5 documents recovered and verified` — decryption succeeded and
-every file matched its pre-attack SHA-256 baseline. Original filenames are
-restored and the `.WNCRY` envelopes are removed.
+The watch decrypted the request's sealed blob with `attacker_priv` and
+posted `victim_priv` back **in plaintext** (no privacy — we are the
+attackers; it only exists after payment).
+
+## Phase F+ — the key grant and the manual decrypt (host_0 shell)
+
+The victim's waiting menu wakes up on its own and prints the **KEY GRANTED**
+screen with the AES file key to copy:
+
+```text
+============================================================================
+  KEY GRANTED - YOUR DECRYPTION KEY (copy it):
+
+  <base64 key>
+
+============================================================================
+Run the decryptor on this host and paste this key when asked:
+  python3 /opt/wannacry-v2/decryptor.py
+```
+
+Leave the menu (0), then run the decryptor and paste the key:
+
+```bash
+python3 /opt/wannacry-v2/decryptor.py
+```
+
+Expected: `decrypting <name>... hash verified` for each of the five
+documents, then `5 documents recovered and verified` — original filenames
+restored, `.WNCRY` envelopes removed, every file matched against its
+pre-attack SHA-256 baseline. Nothing is recovered until the victim pastes
+the key: recovery is manual, not silent.
 
 ## Phase G — collect the ransom (host_1 shell, optional)
 
@@ -165,7 +192,7 @@ Expected: `ransoms swept: 0x...`, then the attacker address at roughly
 ## Reset rules
 
 - Recreating a host container wipes its writable layer: wallets, keys, keylog,
-  documents. Re-run phases C–F after any rebuild (the utility account and
+  documents. Re-run phases C–F+ after any rebuild (the utility account and
   contract address change on a fresh chain too).
 - Full reset: `docker compose down` → phase A again. A plain `up -d` restart
   regenerates documents but keeps the wallet and chain databases.

@@ -5,12 +5,16 @@ read this first, and **update this file after any significant change**.
 
 ## Project location
 
-- Example: `/home/seed/research/seed-emulator/examples/yesterday_once_more/Y04_wannacry/v2/`
-- ChainSeed package: `/home/seed/research/chain-seed/` (also installed in uv cache — patched copies exist in BOTH, see bug #2/#3 below)
-- SEED emulator: `/home/seed/research/seed-emulator/`
-- Compile env: `~/.local/bin/python3.10` with
-  `PYTHONPATH=/home/seed/research/chain-seed:/home/seed/research/seed-emulator`
-  (default python3.14 does NOT work — chainseed needs <3.11)
+- Example: `/home/hamza/Seed/seed-emulator/examples/yesterday_once_more/Y04_wannacry/v2/`
+  (machine moved 2026-11-05; old paths `/home/seed/research/...` are stale)
+- ChainSeed package: `/home/hamza/Seed/chain-seed/` (upstream clone, clean — no patches needed)
+- SEED emulator: `/home/hamza/Seed/seed-emulator/` (fork, branch wannacry-payload)
+- Compile env: `/home/hamza/Seed/.venv-y04/bin/python` (uv-made Python 3.10 venv,
+  seedemu deps + chain-seed deps + py-solc-x installed) with
+  `PYTHONPATH=/home/hamza/Seed/chain-seed:/home/hamza/Seed/seed-emulator`
+  (system python3.12 does NOT work — chainseed needs <3.11)
+- RansomExchange.bin regenerated via `contracts/compile_contract.py` (2026-11-05,
+  3351 bytes bytecode, london pin intact)
 
 ## What this lab is
 
@@ -51,10 +55,14 @@ victim_priv/victim_pub     — generated per victim at payload execution
   victim_priv SEALED under attacker_pub (hybrid AES-GCM + RSA-OAEP)
 file key (one AES-256-GCM key) — encrypts all 5 files, sealed under victim_pub
 Recovery chain: attacker_priv -> victim_priv -> file key -> files
-Reply channel: per-request EPHEMERAL X25519 keypair (session key, not a
-  third persistent key). Request needs no transfer key (the sealed blob is
-  already self-protecting). Wallet (Ethereum) key is for SIGNING only —
-  never reuse it for content crypto (user explicitly rejected that).
+Reply channel: NO privacy — victim_priv travels on-chain in PLAINTEXT
+  (v2.2, 2026-11-14: user decision — as attackers we don't care about victim
+  privacy; the ephemeral X25519 + HKDF transport sealing was REMOVED).
+  Recovery is MANUAL: option 5 ends at the KEY GRANTED screen printing the
+  AES file key; the victim pastes it into decryptor.py (new file on host_0)
+  which decrypts/verifies/restores. No silent auto-recovery anymore.
+  Wallet (Ethereum) key is for SIGNING only — never reuse it for content
+  crypto (user explicitly rejected that).
 ```
 
 Encrypted file format: `Y04LAB1\n | nonce(12) | ciphertext | tag(16)`,
@@ -78,7 +86,9 @@ recover/watch/withdraw), `lab_ransom_chain.py` (on-chain transport: calldata via
 eth_abi + hand-computed selectors, signing via eth-account, JSON-RPC via
 urllib — NO web3 dependency on host), `participant.py`+`terminal_ui.py`
 (participant UI: inspect [2], SEED Exchange funding [3], wallet [6],
-recovery/exchange [5]), `lab_wallet.py` (keystore, balance, faucet funding),
+recovery/exchange [5] — ends at the KEY GRANTED screen), `decryptor.py`
+(manual decryptor: paste the granted AES key, verifies baselines, restores
+names), `lab_wallet.py` (keystore, balance, faucet funding),
 `wormdoor.py` (victim delivery inbox on :4450 — drops attacker_pub.pem and
 detonates the payload in-process; one-shot; GET /status, POST /drop),
 `check_state.py` (one-shot read-only status incl. door state —
@@ -87,15 +97,18 @@ ransom note), `MANUAL_RUNBOOK.txt` (repo-level manual-command runbook).
 
 ## The contract (RansomExchange)
 
-- `registerVictim(bytes ephemeralPub, bytes sealedBlob)` payable, ENFORCED:
+- `registerVictim(bytes sealedBlob)` payable, ENFORCED:
   reverts unless msg.value == RANSOM_WEI (1 ether constant — constructor has
-  NO arguments because ChainSeed's deploy script can't pass any)
-- `submitReply(uint256 id, bytes sealedReply)` — only the contract `attacker`
-  (set at deploy = msg.sender = the utility server's deploy account)
+  NO arguments because ChainSeed's deploy script can't pass any).
+  (v2.2: the ephemeralPub argument is GONE — no privacy channel.)
+- `submitReply(uint256 id, bytes plainReply)` — only the contract `attacker`
+  (set at deploy = msg.sender = the utility server's deploy account);
+  posts victim_priv in PLAINTEXT (nothing sealed for transport)
 - `getReply(id)` view — reverts NoReplyYet() (selector 0x70fe9626) until
   answered; the client must TOLERATE this revert while polling
 - `withdraw()` — attacker sweeps contract balance
-- Contract transports only OPAQUE sealed bytes; all crypto stays off-chain
+- Request blob is sealed under attacker_pub (the coercion lock); the reply
+  is plaintext — all transport privacy removed by design (v2.2)
 - Deployed automatically at `up -d` by ChainSeed's utility server
   (10.180.0.95:8080, address served at `/contracts_info?name=RansomExchange`
   — NOTE: returns the address as a plain JSON STRING, not a dict)
@@ -149,8 +162,8 @@ processes — after hot-patching, restart participant.py (or the CLI) so the
 new module code loads. Symptom seen: victim menu hit `Action unavailable:
 'file_key'` until restarted.
 
-## Operational runbook (v2.1 demo path — v2.0 flow proven 2026-11-04/05;
-## v2.1 flow built + unit-tested, live rehearsal pending)
+## Operational runbook (v2.2 demo path — v2.1 flow proven live 2026-11-05;
+## v2.2 = plaintext reply + KEY GRANT + manual decryptor, unit-tested only)
 
 Phase A (docker host): `python emulator.py --override` (with the PYTHONPATH
 env above) → `cd output && docker compose build && docker compose up -d` →
@@ -166,20 +179,64 @@ init-attacker` → save account.json as `attacker_chain_key.json` on host_1
 expect {"status": "infected", "files_encrypted": 5} — the victim's files are
 now <name>.WNCRY envelopes and the ransom note is in place. Phase E (host_0,
 participant menu only): `python3 participant.py` → 6 (create wallet) →
-3 (SEED Exchange: buy lab ETH — presets or custom) → 5 (pay ransom +
-recover; password when prompted) → LEAVE IT WAITING. Phase F (host_1):
-`python3 lab_keylogic.py watch --chain-key attacker_chain_key.json --rpc-url
-http://10.180.0.83:8545 --utility-url http://10.180.0.95:8080` →
-`[{"id": 0, ...}]`; the victim's waiting menu then prints "5 documents
-recovered and verified" (original names restored, .WNCRY gone). Phase G
-(optional, host_1): `withdraw` → "ransoms swept". Debug anything with
+3 (SEED Exchange: buy lab ETH — presets or custom) → 5 (pay ransom; password
+when prompted) → LEAVE IT WAITING. Phase F (host_1): `python3 lab_keylogic.py
+watch --chain-key attacker_chain_key.json --rpc-url http://10.180.0.83:8545
+--utility-url http://10.180.0.95:8080` → `[{"id": 0, ...}]` (posts
+victim_priv in PLAINTEXT). Phase F+ (host_0): the waiting menu wakes and
+prints the KEY GRANTED screen with the AES file key → exit menu →
+`python3 decryptor.py`, paste the key → per-file "hash verified" →
+"5 documents recovered and verified" (original names restored, .WNCRY gone).
+Phase G (optional, host_1): `withdraw` → "ransoms swept". Debug anything with
 `check_state.py` (runs on either host, read-only; shows door status).
 
 Wallet password: the user chose it; wallets live in the container writable
 layer (wiped on container recreate). Note: recreate of host_0 wipes
-wallet/keys/keylog — rerun phases C–F after any rebuild.
+wallet/keys/keylog — rerun phases C–F+ after any rebuild.
 
-## State at last update (2026-11-05, v2.1)
+## State at last update (2026-11-15, v2.2)
+
+- V2.2 PROTOCOL CHANGE (2026-11-14, user-decided): (1) removed ALL transport
+  privacy from the on-chain exchange — the ephemeral X25519 + HKDF reply
+  channel is deleted; registerVictim now takes only the sealed blob (bytes),
+  and the watch posts victim_priv in PLAINTEXT. Rationale from the user:
+  as attackers we don't care about victims' privacy, so concealment was
+  pointless ceremony. The WannaCry key hierarchy itself is untouched —
+  per-victim RSA keypairs + per-victim AES file keys, nothing shared.
+  (2) MANUAL KEY GRANT: option 5 no longer auto-recovers. It ends at the
+  KEY GRANTED screen printing the AES file key; the victim pastes it into
+  the new decryptor.py (host_0 /opt/wannacry-v2/, added to VICTIM_FILES),
+  which narrates per-file decryption + baseline verification. RansomExchange
+  recompiled (3038 bytes bytecode, london pin intact). NOTE: venv was
+  missing the `cryptography` package on this machine — reinstalled via
+  `uv pip install --python .venv-y04/bin/python cryptography`.
+
+- CLEAN-SLATE V2.2 DRESS REHEARSAL COMPLETED LIVE (2026-11-15): fresh build →
+  up; contract ALIVE at 0x65A4eDf169dd3fB5117B3B52Ea30EE4da5A378B4
+  (2969 bytes code — distinguish from stale v2.1's 3282). Attacker account
+  0xaafc4a709B71D908114bD71D8B1963c8DfFda320. init-attacker on host_1 →
+  deliver (files_encrypted: 5) → wallet + SEED Exchange buy → option 5 paid
+  registration (request id 0, tx 0xb4a5f80f...) → watch posted plaintext
+  reply → host_0 menu woke and printed KEY GRANTED with the copyable AES
+  key → victim pasted it into decryptor.py → per-file "hash verified" →
+  "5 documents recovered and verified". ZERO hot-patches, first-try on every
+  seam. THE V2.2 DEMO PATH IS DEMO-READY.
+  Gotchas hit during rehearsal (process, not code): user first booted the
+  STALE Nov-5 build (old output/, old contract 3282 bytes) — must re-run
+  `emulator.py --override` with the VENV python + PYTHONPATH, then rebuild;
+  user pasted `...` instead of the full echo line — chain-key JSON must be
+  copied from the notefile, not from chat. Watch CLI: `--keylog` no longer
+  exists (v2.2). withdraw phase (G) not run this rehearsal.
+  NOT yet done: git commit/push of v2.2 to the user's fork.
+
+## Older state (2026-11-05, v2.1)
+
+- REBUILT ON NEW MACHINE (2026-11-05): env set up from scratch (uv venv 3.10,
+  upstream chain-seed clone, solc recompile) → clean build → up; every node
+  Up, contract deployed ALIVE at 0x92444E49a69Ff464aF6Ae15eaE17d0B2c36Ea5d9
+  (fresh chain — attacker account differs from past runs), wormdoor on host_0
+  answering /status "clean", host_1 check_state green. Phases C–G not yet run
+  on this build.
 
 - FIRST-DRAFT DEMO DECLARED GOOD by the user after the live v2.1 cycle.
 - DOCUMENTATION PASS (same day): architecture.puml (component/flow diagram,

@@ -63,12 +63,11 @@ class SelectorAgreementTests(unittest.TestCase):
 
 class CalldataTests(unittest.TestCase):
     def test_register_calldata_round_trip(self):
-        pub = b"\x01" * 32
         blob = json.dumps({"wrap": "x"}).encode()
-        data = chain.SELECTOR_REGISTER + abi_encode(["bytes", "bytes"], [pub, blob])
+        data = chain.SELECTOR_REGISTER + abi_encode(["bytes"], [blob])
         payload = data[len(chain.SELECTOR_REGISTER):]
-        decoded_pub, decoded_blob = abi_decode(["bytes", "bytes"], payload)
-        self.assertEqual((decoded_pub, decoded_blob), (pub, blob))
+        (decoded_blob,) = abi_decode(["bytes"], payload)
+        self.assertEqual(decoded_blob, blob)
 
     def test_reply_calldata_round_trip(self):
         reply = json.dumps({"reply_pub_b64": "AA==", "nonce": "BQ==", "ct": "Ag=="}).encode()
@@ -123,47 +122,64 @@ class OfflineReplyTests(unittest.TestCase):
         self.keylog = json.loads((self.root / "lab_keylogic.json").read_text())
 
     def test_attacker_watch_reply_round_trip(self):
-        # Victim-side request record as it would be read from the chain.
-        import base64
-        ephemeral = lab_keylogic.x25519.X25519PrivateKey.generate()
-        ephemeral_pub_b64 = base64.b64encode(
-            ephemeral.public_key().public_bytes(
-                lab_keylogic.serialization.Encoding.Raw,
-                lab_keylogic.serialization.PublicFormat.Raw,
-            )
-        ).decode()
-        request = {
-            "participant_id": self.keylog["participant_id"],
-            "ephemeral_pub_b64": ephemeral_pub_b64,
-        }
         victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
             lab_keylogic.unb64(
                 json.loads((self.root / "attacker_keys.json").read_text())["attacker_priv_pem"]
             ),
             self.keylog,
         )
-        # New protocol: the attacker replies with victim_priv ONLY — the
-        # victim derives the file key locally from its own keylog.
-        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem)
+        # New protocol: the attacker replies with victim_priv in PLAINTEXT —
+        # no ephemeral keys, no transport sealing.
+        reply = lab_keylogic.attacker_build_reply(victim_priv_pem)
+        self.assertEqual(reply["victim_priv_pem"], victim_priv_pem.decode())
+        self.assertNotIn("ct", reply)
 
-        # Victim opens the reply with its saved ephemeral private key.
-        request_path = self.root / "exchange_request.json"
-        request_path.write_text(json.dumps(
-            {**request, "ephemeral_priv_b64": lab_keylogic.b64(
-                ephemeral.private_bytes(
-                    lab_keylogic.serialization.Encoding.Raw,
-                    lab_keylogic.serialization.PrivateFormat.Raw,
-                    lab_keylogic.serialization.NoEncryption(),
-                )
-            )}
-        ))
-        opened = lab_keylogic.victim_accept_reply(request_path, reply, self.keylog)
+        # Victim accepts the plaintext reply and derives the file key locally.
+        opened = lab_keylogic.victim_accept_reply(reply, self.keylog)
         plain = lab_keylogic.AESGCM(opened["file_key"]).decrypt(
             lab_keylogic.unb64(self.keylog["files"]["notes.txt"]["nonce"]),
             lab_keylogic.unb64(self.keylog["files"]["notes.txt"]["ciphertext"]),
             b"as180-host_0/notes.txt",
         )
         self.assertEqual(plain.decode(), "Team handover notes\nPrepare the weekly report on Friday.\nThe next team meeting is on Monday.\n")
+
+    def test_decryptor_pasted_key_recovers_files(self):
+        """The manual decryptor path: paste the granted key, get the files."""
+        import base64
+        import decryptor
+        victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
+            lab_keylogic.unb64(
+                json.loads((self.root / "attacker_keys.json").read_text())["attacker_priv_pem"]
+            ),
+            self.keylog,
+        )
+        file_key = lab_keylogic.victim_open_file_key(victim_priv_pem, self.keylog)
+        state_path = self.root / "participant.json"
+        state_path.write_text(json.dumps({
+            "original_hashes": {
+                name: hashlib.sha256(data).hexdigest()
+                for name, data in lab_keylogic.SAMPLES.items()
+            }
+        }))
+        decryptor.decrypt_everything(
+            file_key, self.corpus,
+            self.root / "lab_keylogic.json", state_path,
+        )
+        for name in lab_keylogic.SAMPLES:
+            self.assertTrue((self.corpus / name).exists())
+            self.assertFalse((self.corpus / (name + lab_keylogic.ENCRYPTED_SUFFIX)).exists())
+
+    def test_decryptor_rejects_bad_key(self):
+        from cryptography.exceptions import InvalidTag
+        import decryptor
+        state_path = self.root / "participant.json"
+        state_path.write_text(json.dumps({"original_hashes": {}}))
+        with self.assertRaises(InvalidTag):
+            # A wrong 32-byte key fails the GCM tag check.
+            decryptor.decrypt_everything(
+                b"\x05" * 32, self.corpus,
+                self.root / "lab_keylogic.json", state_path,
+            )
 
     def test_watch_works_without_local_keylog(self):
         """attacker_watch's on-chain-blob path: no victim keylog required.

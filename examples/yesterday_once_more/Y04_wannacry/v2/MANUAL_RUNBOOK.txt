@@ -23,9 +23,13 @@ SEED Exchange screen; this is the same faucet underneath):
 Check balance:
     python3 -c "import lab_wallet; print(lab_wallet.format_ether(lab_wallet.balance_wei(lab_wallet.connect(), lab_wallet.wallet_address(lab_wallet.Path('/opt/wannacry-v2/wallet.json')))), 'lab ETH')"
 
-Pay the ransom and recover (registers request, pays 1 ETH on-chain,
-waits for the attacker reply, decrypts, restores original filenames):
+Pay the ransom and get the key (registers request, pays 1 ETH on-chain,
+waits for the attacker reply, prints the KEY GRANTED screen):
     python3 /opt/wannacry-v2/participant.py    # then choose option 5
+
+Paste the granted key into the decryptor (decrypts, verifies against the
+recorded baselines, restores original filenames):
+    python3 /opt/wannacry-v2/decryptor.py
 
 --- ATTACKER SIDE (host_1) ---
 
@@ -47,7 +51,8 @@ Sweep the contract balance:
 - The attacker public key travels from host_1 to host_0 through the victim's
   delivery inbox (:4450). This stand-in plays the worm's drop stage; real
   propagation will replace it.
-- The reply carries only the victim's private key. The victim host derives
-  its own file key; no key material beyond that ever crosses the chain.
+- The reply carries the victim's private key in plaintext — no privacy
+  sealing, the attackers do not care. It only exists after the ransom
+  arrived; the victim reads it back and unseals its own file key locally.
 - Recreating a host container wipes runtime state (wallet, keys, keylog) —
   re-run setup after any rebuild.

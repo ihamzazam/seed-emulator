@@ -29,15 +29,21 @@ From the home screen:
   [5] Document recovery runs the enforced exchange: it registers your request
       on-chain with the exact ransom payment (the RansomExchange contract
       rejects any other amount), waits for the attacker's reply, unseals your
-      file key with your recovered private key, decrypts all documents, and
-      removes the .WNCRY envelopes. After success every document shows
-      ORIGINAL again and the recorded state becomes RECOVERED. Report any
-      error rather than assuming success.
+      file key with your recovered private key, and prints the KEY GRANTED
+      screen. Copy that key, leave the menu, and run the decryptor:
+
+          python3 /opt/wannacry-v2/decryptor.py
+
+      Paste the key when asked. The decryptor decrypts every document,
+      verifies each against the recorded baseline, restores the original
+      filenames, and removes the .WNCRY envelopes. Report any error rather
+      than assuming success.
 
 The encrypted envelope of your private key was sent to the attacker through
 the blockchain. It is useless to anyone without the attacker's private key,
-which never exists on this host. The attacker replies on-chain; only your
-host can open that reply.
+which never exists on this host. After payment the attacker replied on-chain
+in plaintext (they do not care about your privacy); only that reply lets you
+unseal your own file key.
 
 Use b to return from a screen and 0 at home to exit. Only one participant
 menu can be active per host at a time. Reading instructions, inspecting

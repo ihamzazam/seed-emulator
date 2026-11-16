@@ -41,8 +41,8 @@ steps=[
  ('Deliver', 'The attacker sends its public key to wormdoor.py at POST /drop. This inbox stands in for worm delivery; it does not simulate an exploit.', 'host_1 → host_0 · delivery inbox :4450'),
  ('Encrypt', 'The victim runs the payload locally. Five generated documents become .WNCRY envelopes and their plaintext originals are removed.', 'host_0 · RSA-2048 + AES-256-GCM'),
  ('Pay', 'The victim creates a wallet, gets lab ETH through the SEED Exchange menu, and signs registerVictim with exactly 1 lab ETH. The wallet key signs transactions only.', 'host_0 → RansomExchange · signed payment + sealed request'),
- ('Reply', 'The attacker watches on-chain requests and posts victim_priv sealed for the victim’s ephemeral X25519 key. The attacker’s RSA private key stays on host_1.', 'host_1 → RansomExchange · attacker-authorized sealed reply'),
- ('Recover', 'The victim polls getReply, opens the sealed reply, unseals its file key locally, and restores all five documents. Every recovered file is checked against its original SHA-256 baseline.', 'RansomExchange → host_0 · read reply, then recover locally')]
+ ('Reply', 'The attacker watches on-chain requests, recovers victim_priv with the RSA private key, and posts it back in plaintext. As the attackers we do not care about privacy; it only appears after payment.', 'host_1 → RansomExchange · attacker-authorized plaintext reply'),
+ ('Recover', 'The victim polls getReply, unseals its file key, and the menu prints the KEY GRANTED screen. The victim pastes that key into decryptor.py, which restores all five documents, each checked against its original SHA-256 baseline.', 'RansomExchange → host_0 · key grant, then manual decrypt')]
 def flow(n,y,x1,x2,label,detail,color,marker,local=False):
     parts.append(f'<g class="step" data-step="{n}">')
     rect(64,y-38,38,32,fill='#172438',stroke=color,r=9);txt(83,y-16,f'{n:02}',14,color,'700','middle')

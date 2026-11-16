@@ -41,7 +41,7 @@
       {
         "indexed": false,
         "internalType": "bytes",
-        "name": "sealedReply",
+        "name": "plainReply",
         "type": "bytes"
       }
     ],
@@ -62,12 +62,6 @@
         "internalType": "address",
         "name": "victim",
         "type": "address"
-      },
-      {
-        "indexed": false,
-        "internalType": "bytes",
-        "name": "ephemeralPub",
-        "type": "bytes"
       }
     ],
     "name": "VictimRegistered",
@@ -135,11 +129,6 @@
     "inputs": [
       {
         "internalType": "bytes",
-        "name": "ephemeralPub",
-        "type": "bytes"
-      },
-      {
-        "internalType": "bytes",
         "name": "sealedBlob",
         "type": "bytes"
       }
@@ -191,11 +180,6 @@
       },
       {
         "internalType": "bytes",
-        "name": "ephemeralPub",
-        "type": "bytes"
-      },
-      {
-        "internalType": "bytes",
         "name": "sealedBlob",
         "type": "bytes"
       },
@@ -217,7 +201,7 @@
       },
       {
         "internalType": "bytes",
-        "name": "sealedReply",
+        "name": "plainReply",
         "type": "bytes"
       }
     ],

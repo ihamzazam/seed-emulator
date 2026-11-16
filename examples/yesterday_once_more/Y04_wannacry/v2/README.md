@@ -12,9 +12,9 @@ manually over BTC + TOR.
 The attacker delivers a payload to the victim workstation, documents are
 encrypted into `<name>.WNCRY` envelopes, the victim creates a wallet, buys lab
 ETH on the in-menu "SEED Crypto Exchange", pays the enforced 1-ETH ransom
-on-chain, and recovers all documents with their original names after the
-attacker replies on-chain — every recovered file verified against its
-pre-attack SHA-256 baseline.
+on-chain, and is **granted the AES file key on screen** — which they paste
+into `decryptor.py` to restore every document under its original name, each
+verified against its pre-attack SHA-256 baseline.
 
 ## Topology (AS180, 10.180.0.0/24)
 
@@ -57,11 +57,12 @@ cairosvg diagrams/architecture.svg -o diagrams/architecture.png -s 2
 - **Key hierarchy** (never change without discussion):
   `attacker_priv` (born on host_1, never leaves) → sealed `victim_priv`
   (posted on-chain as an inert blob) → file key (never leaves the victim) →
-  files. The reply carries **only** `victim_priv`; the victim unseals its own
-  file key locally. The per-request ephemeral X25519 keypair protects the
-  reply channel; the Ethereum wallet key signs only, never encrypts.
-- **The chain carries only opaque sealed bytes.** Enforcement is in the EVM:
-  `registerVictim` requires exactly 1 lab ETH; `submitReply` is attacker-only.
+  files. The reply carries **only** `victim_priv`, in **plaintext** — as the
+  attackers we do not care about victim privacy, so nothing is sealed for
+  transport; the Ethereum wallet key signs only, never encrypts.
+- **The chain carries sealed request bytes and plaintext reply bytes.**
+  Enforcement is in the EVM: `registerVictim` requires exactly 1 lab ETH;
+  `submitReply` is attacker-only. The reply only exists after payment.
 - **Encrypted-file format**: `Y04LAB1\n | nonce(12) | ciphertext | tag(16)`,
   participant id + filename authenticated as AES-GCM associated data.
 - **`wormdoor.py`** on host_0 is the worm's drop point played by hand — a
@@ -91,6 +92,7 @@ command, expected output, and a troubleshooting table.
 | `lab_ransom_chain.py` | on-chain transport: hand-computed selectors + eth-account signing, no web3 |
 | `lab_wallet.py` | encrypted keystore, balance queries, faucet funding |
 | `wormdoor.py` | victim delivery inbox (:4450): drops the pub key, detonates the payload |
+| `decryptor.py` | manual decryptor: paste the granted key, documents restored + verified |
 | `file_generator.py` / `prepare_participant.py` | the 5 fixtures + SHA-256 baseline (`participant.json`) |
 | `participant.py` / `terminal_ui.py` | the participant menu: inspect [2], SEED Exchange [3], pay/recover [5], wallet [6] |
 | `check_state.py` | one-shot read-only status (run this first when debugging) |

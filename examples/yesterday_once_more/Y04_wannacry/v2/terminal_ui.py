@@ -217,7 +217,7 @@ def run_interface(target, state_file, inspect_documents):
                     elif choice == "5":
                         heading(
                             "DOCUMENT RECOVERY",
-                            "Blockchain key exchange / enforced ransom payment",
+                            "Blockchain key exchange / grant + manual decryptor",
                         )
                         lab_dir = state_file.parent
                         wallet_file = lab_dir / "wallet.json"

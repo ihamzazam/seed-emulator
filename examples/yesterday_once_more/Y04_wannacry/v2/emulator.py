@@ -38,6 +38,7 @@ VICTIM_FILES = (
     "lab_wallet.py",
     "terminal_ui.py",
     "wormdoor.py",
+    "decryptor.py",
     "PARTICIPANT_README.txt",
 )
 ATTACKER_FILES = (
